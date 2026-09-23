@@ -1,0 +1,31 @@
+{
+  "name": "arbiter",
+  "version": "2.0.0",
+  "description": "Arbiter \u2014 trustless settlement for AI-agent commerce on Arbitrum (Open House Singapore Buildathon)",
+  "private": true,
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "deploy:arbitrum": "hardhat run scripts/deploy.js --network arbitrumSepolia",
+    "deploy:robinhood": "hardhat run scripts/deploy-robinhood-demo.js --network robinhoodTestnet",
+    "deploy:arbitrum:one": "hardhat run scripts/deploy.js --network arbitrumOne",
+    "deploy:robinhood:mainnet": "hardhat run scripts/deploy.js --network robinhoodMainnet",
+    "demo:arbitrum": "hardhat run scripts/demo.js --network arbitrumSepolia",
+    "demo:usdg": "hardhat run scripts/demo-usdg.js --network arbitrumOne",
+    "demo:usdg:testnet": "hardhat run scripts/demo-usdg.js --network arbitrumSepolia",
+    "demo:autoresolve": "hardhat run scripts/demo-autoresolve.js --network arbitrumOne",
+    "demo:autoresolve:testnet": "hardhat run scripts/demo-autoresolve.js --network arbitrumSepolia",
+    "start": "bash start.sh",
+    "backend": "cd backend && node server.js",
+    "frontend": "cd client && npx vite --host",
+    "dev": "concurrently \"npm run backend\" \"npm run frontend\"",
+    "install:all": "cd backend && npm install && cd ../client && npm install",
+    "demo:b2b": "hardhat run scripts/demo-b2b.js --network arbitrumSepolia"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^6.0.0",
+    "concurrently": "^8.2.2",
+    "dotenv": "^16.4.5",
+    "hardhat": "^2.26.0"
+  }
+}
