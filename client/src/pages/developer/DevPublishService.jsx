@@ -1,0 +1,770 @@
+import React, { useMemo, useEffect, useState } from 'react';
+import toast from 'react-hot-toast';
+import { useNavigate, useParams } from 'react-router-dom';
+import {
+  FiArrowLeft, FiArrowRight, FiCheck, FiCheckCircle, FiCpu,
+  FiShoppingBag, FiTrendingUp, FiShield, FiSearch
+} from 'react-icons/fi';
+import useApi from '../../hooks/useApi';
+import developerApi from '../../utils/developerApi';
+import Pill from '../../components/dev/Pill';
+import ErrorBanner from '../../components/dev/ErrorBanner';
+import Skeleton from '../../components/dev/Skeleton';
+
+const STEPS = [
+  { id: 0, label: 'Service Details', hint: 'What are you selling?' },
+  { id: 1, label: 'Pricing & Billing', hint: 'How should buyers pay?' },
+  { id: 2, label: 'Review & Publish', hint: 'Preview exactly how it appears in the Marketplace' }
+];
+
+const CATEGORY_META = {
+  'ai-model': { icon: '🧠', title: 'AI Models', desc: 'Large language models and inference APIs' },
+  'llm-inference': { icon: '🧠', title: 'LLM Inference', desc: 'Chat completion and text generation' },
+  'image-ai': { icon: '🎨', title: 'Image AI', desc: 'Image generation, editing, and OCR' },
+  vision: { icon: '👁️', title: 'Vision', desc: 'Image analysis and object detection' },
+  speech: { icon: '🎤', title: 'Speech', desc: 'Speech-to-text and text-to-speech' },
+  gpu: { icon: '⚡', title: 'GPU Compute', desc: 'GPU-backed training and inference workloads' },
+  compute: { icon: '🖥️', title: 'Compute', desc: 'CPU and general-purpose workloads' },
+  ocr: { icon: '📄', title: 'OCR / Vision', desc: 'Extract text and structure from images' },
+  voice: { icon: '🎤', title: 'Voice & Speech', desc: 'Speech recognition, TTS, and audio' },
+  translation: { icon: '🌍', title: 'Translation', desc: 'Text translation between languages' },
+  video: { icon: '🎬', title: 'Video', desc: 'Video processing, streaming, and generation' },
+  storage: { icon: '📦', title: 'Storage', desc: 'Store and retrieve files securely' },
+  api: { icon: '🔌', title: 'Data APIs', desc: 'Data feeds and structured endpoints' },
+  'data-api': { icon: '📊', title: 'Data APIs', desc: 'Weather, finance, blockchain, and analytics' },
+  security: { icon: '🔐', title: 'Security', desc: 'KYC, verification, malware scanning' },
+  'web-search': { icon: '🌐', title: 'Web & Search', desc: 'Search, crawling, and scraping' },
+  'developer-tools': { icon: '🛠', title: 'Developer Tools', desc: 'Code execution, testing, and CI/CD' },
+  'ai-agent': { icon: '🤖', title: 'AI Agents', desc: 'Autonomous agents and copilots' },
+  other: { icon: '✨', title: 'Other', desc: 'Anything else on the network' }
+};
+
+const PRICING_META = {
+  per_request: { icon: '🔁', title: 'Per Request', desc: 'Charge once per API call' },
+  per_unit: { icon: '🧾', title: 'Per Unit', desc: 'Charge per unit — tokens, images, GB' },
+  per_hour: { icon: '⏱️', title: 'Per Hour', desc: 'Charge for compute time used' },
+  per_char: { icon: '✍️', title: 'Per Character', desc: 'Charge per character processed' },
+  per_mb_day: { icon: '💾', title: 'Per MB / Day', desc: 'Charge for data stored per day' },
+  flat: { icon: '💰', title: 'Flat Fee', desc: 'One-time fixed payment' },
+  subscription: { icon: '♻️', title: 'Subscription', desc: 'Recurring monthly fee' }
+};
+
+const UNIT_CHIPS = ['request', 'image', 'hour', 'token', 'GB', 'minute', 'character'];
+
+const input =
+  'w-full bg-zinc-900/80 border border-zinc-700 rounded-lg px-3.5 py-2.5 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600/50 transition-colors';
+
+const EMPTY = { title: '', category: 'compute', description: '', pricingModel: 'per_unit', unitLabel: 'request', unitPrice: '0.01', agentId: '', endpointUrl: '', healthCheckUrl: '', requireX402: false, x402Price: '0.01' };
+
+const priceLabel = (pm) => {
+  switch (pm) {
+    case 'per_request': return 'request';
+    case 'per_hour': return 'hour';
+    case 'per_char': return 'character';
+    case 'per_mb_day': return 'MB / day';
+    case 'flat': return 'one-time';
+    case 'subscription': return 'month';
+    default: return 'unit';
+  }
+};
+
+const DevPublishService = () => {
+  const navigate = useNavigate();
+  const { serviceId } = useParams();
+  const editing = !!serviceId;
+
+  const agentsState = useApi({ fetcher: () => developerApi.agents({ perPage: 100 }) });
+  const servicesState = useApi({ fetcher: () => developerApi.services(), deps: [] });
+  const editingState = useApi({
+    fetcher: () => (editing ? developerApi.marketplaceService(serviceId).then((r) => r.service) : Promise.resolve(null)),
+    enabled: editing,
+    deps: [editing, serviceId]
+  });
+  const agents = useMemo(() => agentsState.data?.agents || [], [agentsState.data]);
+  const services = useMemo(() => servicesState.data?.services || [], [servicesState.data]);
+
+  const editingService = editingState.data || (editing ? services.find((s) => s.serviceId === serviceId) : null);
+
+  const [step, setStep] = useState(0);
+  const [form, setForm] = useState(() => ({ ...EMPTY }));
+  const [categoryQuery, setCategoryQuery] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!editing) return;
+    if (editingService) {
+      setStep(1);
+      setForm({
+        title: editingService.title,
+        category: editingService.category,
+        description: editingService.description || '',
+        pricingModel: editingService.pricingModel,
+        unitLabel: editingService.unitLabel || 'request',
+        unitPrice: String(editingService.unitPrice ?? ''),
+        agentId: editingService.agentId || '',
+        endpointUrl: editingService.endpointUrl || '',
+        healthCheckUrl: editingService.healthCheckUrl || '',
+        requireX402: Boolean(editingService.requireX402),
+        x402Price: String(editingService.x402Price || '0.01')
+      });
+    }
+  }, [editing, editingService]);
+
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const activeCountByAgent = useMemo(() => {
+    const map = {};
+    services.filter((s) => s.isActive).forEach((s) => { map[s.agentId] = (map[s.agentId] || 0) + 1; });
+    return map;
+  }, [services]);
+
+  const autoPickAgent = useMemo(() => {
+    if (!agents.length) return '';
+    const ranked = [...agents].sort((a, b) => (activeCountByAgent[b.agentId] || 0) - (activeCountByAgent[a.agentId] || 0) || String(a.name || '').localeCompare(String(b.name || '')));
+    return ranked[0].agentId;
+  }, [agents, activeCountByAgent]);
+
+  useEffect(() => {
+    if (!form.agentId && autoPickAgent) {
+      setForm((f) => ({ ...f, agentId: autoPickAgent }));
+    }
+  }, [autoPickAgent, form.agentId]);
+
+  const titleValid = form.title.trim().length > 0;
+  const priceValid = Number.isFinite(Number(form.unitPrice)) && Number(form.unitPrice) > 0;
+  const stepValid = step === 0 ? titleValid : step === 1 ? priceValid : true;
+
+  const checks = [
+    { ok: titleValid, label: 'Service name' },
+    { ok: !!CATEGORY_META[form.category], label: 'Category' },
+    { ok: priceValid, label: 'Pricing' },
+    { ok: !!form.agentId, label: 'Publishing agent' },
+    { ok: form.endpointUrl.trim().length > 0, label: 'API endpoint' },
+    { ok: form.description.trim().length > 0, label: 'Description', optional: true }
+  ];
+
+  const selectedAgent = agents.find((a) => a.agentId === form.agentId);
+  const visibleCategories = useMemo(() => {
+    const query = categoryQuery.trim().toLowerCase();
+    if (!query) return Object.entries(CATEGORY_META);
+    return Object.entries(CATEGORY_META).filter(([, category]) =>
+      `${category.title} ${category.desc}`.toLowerCase().includes(query)
+    );
+  }, [categoryQuery]);
+  const allReady = checks.filter((c) => !c.optional).every((c) => c.ok);
+
+  const preview = {
+    title: form.title.trim() || 'Your service name',
+    cat: CATEGORY_META[form.category],
+    desc: form.description.trim() || 'Add a description — buyers see this in the Marketplace.',
+    price: form.unitPrice,
+    model: form.pricingModel,
+    unit: form.unitLabel || priceLabel(form.pricingModel),
+    providerName: selectedAgent?.name || 'your agent'
+  };
+
+  const goBack = () => {
+    if (step > 0) setStep((s) => s - 1);
+    else navigate('/developer/marketplace/services');
+  };
+
+  const goNext = () => {
+    if (step === 2) {
+      return submit();
+    }
+    if (!stepValid) {
+      toast.error(step === 0 ? 'Give your service a name first.' : 'Unit price must be greater than zero.');
+      return;
+    }
+    setStep((s) => s + 1);
+  };
+
+  const submit = async () => {
+    if (!form.agentId) { toast.error('Select the agent that publishes this service.'); return; }
+    setSaving(true);
+    try {
+      const body = {
+        title: form.title.trim(),
+        description: form.description.trim(),
+        category: form.category,
+        pricingModel: form.pricingModel,
+        unitPrice: String(Number(form.unitPrice)),
+        unitLabel: form.unitLabel.trim() || null,
+        agentId: form.agentId,
+        endpointUrl: form.endpointUrl.trim() || null,
+        healthCheckUrl: form.healthCheckUrl.trim() || null,
+        requireX402: form.requireX402,
+        x402Price: form.requireX402 ? String(Number(form.x402Price)) : null
+      };
+      if (editing) {
+        await developerApi.updateService(serviceId, body);
+        toast.success('Service updated and live in the Marketplace.');
+      } else {
+        await developerApi.createService(body);
+        toast.success('Service published to the Marketplace.');
+      }
+      navigate('/developer/marketplace/services');
+    } catch (err) {
+      toast.error(err.message || 'Failed to save service');
+      setSaving(false);
+    }
+  };
+
+  if (editing && (servicesState.loading || editingState.loading) && !editingService) {
+    return (
+      <div className="max-w-[1100px] mx-auto">
+        <div className="space-y-4 mt-2">
+          <Skeleton className="h-8 w-56 rounded-lg" />
+          <Skeleton className="h-64 rounded-2xl" />
+          <Skeleton className="h-40 rounded-2xl" />
+        </div>
+      </div>
+    );
+  }
+
+  if (editing && !editingService) {
+    return (
+      <div className="max-w-[1100px] mx-auto">
+        <ErrorBanner
+          message={servicesState.error?.message || 'Service not found.'}
+          onRetry={() => servicesState.refresh()}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-[1100px] mx-auto">
+      <div className="mb-8">
+        <button type="button" onClick={() => navigate('/developer/marketplace/services')} className="inline-flex items-center gap-1.5 text-xs text-zinc-500 hover:text-white mb-3 transition-colors">
+          <FiArrowLeft size={12} /> Back to Services
+        </button>
+        <h1 className="text-2xl font-bold text-white">{editing ? 'Edit Service' : 'Publish Service'}</h1>
+        <p className="text-sm text-zinc-400 mt-1 max-w-2xl">
+          List an AI capability that other agents can discover, purchase, and invoke through the Arbiter Marketplace.
+        </p>
+        <p className="mt-3 max-w-2xl rounded-lg border border-blue-500/20 bg-blue-500/5 px-3 py-2 text-xs text-blue-200/80">
+          One agent wallet can publish multiple separate services. Each service has its own price, endpoint, capabilities, and Marketplace listing.
+        </p>
+        <div className="flex flex-wrap items-center gap-2 mt-5">
+          {STEPS.map((s) => {
+            const done = step > s.id;
+            const active = step === s.id;
+            return (
+              <React.Fragment key={s.id}>
+                <div className="flex items-center gap-2">
+                  <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-medium transition-colors ${
+                    active ? 'bg-blue-600/15 text-blue-300 border-blue-800/60'
+                    : done ? 'bg-emerald-600/10 text-emerald-300 border-emerald-800/40'
+                    : 'bg-zinc-900/60 text-zinc-500 border-zinc-800'
+                  }`}>
+                    {done ? <FiCheck size={12} /> : <span className={`h-1.5 w-1.5 rounded-full ${active ? 'bg-blue-400' : 'bg-current'}`} />}
+                    {s.label}
+                  </div>
+                  {s.id < STEPS.length - 1 && <span className="w-5 h-px bg-zinc-800" />}
+                </div>
+              </React.Fragment>
+            );
+          })}
+        </div>
+        <p className="text-xs text-zinc-500 mt-2">{STEPS[step].hint}</p>
+      </div>
+
+      <div className="grid lg:grid-cols-[1fr_360px] gap-8">
+        {/* Left — form column */}
+        <div className="space-y-6 min-w-0">
+          {step === 0 && (
+            <section className="bg-zinc-900/60 border border-zinc-800 rounded-2xl p-6" style={{ borderRadius: 16 }}>
+               <div className="flex items-start justify-between gap-4 mb-5">
+                 <div>
+                   <h2 className="text-[15px] font-semibold text-white mb-1">Service details</h2>
+                   <p className="text-xs text-zinc-400">Start with the information buyers need to choose your service.</p>
+                 </div>
+                 <span className="shrink-0 rounded-full border border-zinc-800 bg-zinc-950/60 px-2.5 py-1 text-[10px] font-medium text-zinc-500">1 of 3</span>
+               </div>
+
+              <div className="mb-6">
+                <label htmlFor="svc-title" className="block text-xs font-medium text-zinc-400 mb-1.5">
+                  Service Name <span className="text-red-400">*</span>
+                </label>
+                <input
+                  id="svc-title"
+                  value={form.title}
+                  onChange={set('title')}
+                  placeholder="GPT-5 Chat API"
+                  maxLength={120}
+                  autoFocus
+                  className={`${input} ${titleValid ? 'border-emerald-800/60' : ''}`}
+                />
+                <div className="flex items-center justify-between mt-1.5">
+                  <p className="text-[11px] text-zinc-500">This name appears in the Marketplace.</p>
+                  <p className="text-[11px] text-zinc-600">{form.title.length}/120</p>
+                </div>
+              </div>
+
+              <div className="mb-6">
+                 <div className="flex items-center justify-between gap-3 mb-1.5">
+                   <p className="text-xs font-medium text-zinc-400">Category <span className="text-red-400">*</span></p>
+                   <span className="text-[11px] text-zinc-600">Choose the closest match</span>
+                 </div>
+                 <div className="relative mb-2.5">
+                   <FiSearch size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600" />
+                   <input
+                     value={categoryQuery}
+                     onChange={(e) => setCategoryQuery(e.target.value)}
+                     placeholder="Search categories"
+                     aria-label="Search categories"
+                     className={`${input} pl-9 py-2 text-xs`}
+                   />
+                 </div>
+                 <div className="grid sm:grid-cols-2 gap-2 max-h-[360px] overflow-y-auto pr-1">
+                   {visibleCategories.map(([key, c]) => (
+                     <button
+                      key={key}
+                      type="button"
+                      onClick={() => setForm((f) => ({ ...f, category: key }))}
+                       className={`text-left rounded-lg border px-3 py-2.5 transition-all ${
+                        form.category === key
+                          ? 'bg-blue-600/10 border-blue-700/70 ring-1 ring-blue-600/40'
+                          : 'bg-zinc-950/40 border-zinc-800 hover:border-zinc-700'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg leading-none">{c.icon}</span>
+                        <span className={`text-sm font-medium ${form.category === key ? 'text-blue-300' : 'text-zinc-100'}`}>{c.title}</span>
+                        {form.category === key && <FiCheck className="ml-auto text-blue-400" size={14} />}
+                      </div>
+                       <p className="text-[11px] text-zinc-500 mt-1 leading-snug line-clamp-1">{c.desc}</p>
+                     </button>
+                   ))}
+                   {!visibleCategories.length && <p className="sm:col-span-2 py-5 text-center text-xs text-zinc-500">No categories match “{categoryQuery}”.</p>}
+                 </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label htmlFor="svc-desc" className="text-xs font-medium text-zinc-400">Description</label>
+                  <span className="text-[11px] text-zinc-600">{form.description.length}/2000</span>
+                </div>
+                <textarea
+                  id="svc-desc"
+                  value={form.description}
+                  onChange={set('description')}
+                  rows={6}
+                  maxLength={2000}
+                  placeholder={'Describe your API, supported models,\nlatency, SLA, authentication,\nrate limits, and example use cases.'}
+                  className={`${input} resize-y leading-relaxed`}
+                />
+              </div>
+
+              <div className="mt-5 pt-5 border-t border-zinc-800">
+                <h3 className="text-sm font-medium text-white mb-1">Service Endpoint</h3>
+                <p className="text-xs text-zinc-400 mb-4">Where buyers will send requests. This is how your service is actually delivered.</p>
+                
+                <div className="space-y-4">
+                  <div>
+                    <label htmlFor="svc-endpoint" className="text-xs font-medium text-zinc-400 mb-1.5 block">
+                      API Endpoint URL <span className="text-red-400">*</span>
+                    </label>
+                    <input
+                      id="svc-endpoint"
+                      value={form.endpointUrl}
+                      onChange={set('endpointUrl')}
+                      placeholder="https://api.yourservice.com/v1/extract"
+                      className={input}
+                    />
+                    <p className="text-[11px] text-zinc-600 mt-1.5">Buyers will send requests to this URL after purchasing your service.</p>
+                  </div>
+                  
+                  <div>
+                    <label htmlFor="svc-healthcheck" className="text-xs font-medium text-zinc-400 mb-1.5 block">
+                      Health Check URL <span className="text-zinc-600">(optional)</span>
+                    </label>
+                    <input
+                      id="svc-healthcheck"
+                      value={form.healthCheckUrl}
+                      onChange={set('healthCheckUrl')}
+                      placeholder="https://api.yourservice.com/health"
+                      className={input}
+                    />
+                    <p className="text-[11px] text-zinc-600 mt-1.5">Arbiter will monitor this endpoint to verify your service is online.</p>
+                  </div>
+
+                  {/* x402 — HTTP-402 native payment gate */}
+                  <div className="rounded-xl border border-cyan-500/25 bg-cyan-500/5 p-3.5">
+                    <label htmlFor="svc-x402" className="flex items-center gap-2.5 cursor-pointer">
+                      <input
+                        id="svc-x402"
+                        type="checkbox"
+                        checked={form.requireX402}
+                        onChange={(e) => setForm((f) => {
+                          const on = e.target.checked;
+                          return on
+                            ? { ...f, requireX402: true, pricingModel: 'per_request', unitPrice: f.x402Price || '0.01', unitLabel: 'request' }
+                            : { ...f, requireX402: false };
+                        })}
+                        className="w-4 h-4 accent-cyan-500"
+                      />
+                      <div>
+                        <p className="text-xs font-semibold text-white">Require x402 payment</p>
+                        <p className="text-[11px] text-zinc-500">AI agents get HTTP 402 and auto-pay USDC on Arbitrum before each call.</p>
+                      </div>
+                    </label>
+                    {form.requireX402 && (
+                      <div className="mt-3">
+                        <label htmlFor="svc-x402-price" className="text-[11px] font-medium text-zinc-400 mb-1 block">Price per call (USDC)</label>
+                        <input
+                          id="svc-x402-price"
+                          type="number"
+                          step="0.0001"
+                          min="0.0001"
+                          value={form.x402Price}
+                          onChange={(e) => setForm((f) => ({ ...f, x402Price: e.target.value, unitPrice: e.target.value }))}
+                          className={input}
+                        />
+                        <p className="text-[10px] text-zinc-600 mt-1">Synced to marketplace price in Step 2.</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </section>
+          )}
+
+          {step === 1 && (
+            <section className="bg-zinc-900/60 border border-zinc-800 rounded-2xl p-6" style={{ borderRadius: 16 }}>
+              <h2 className="text-[15px] font-semibold text-white mb-1">Pricing</h2>
+              <p className="text-xs text-zinc-400 mb-5">Choose how buyers are billed. You can change this later.</p>
+
+              {form.requireX402 ? (
+                /* ── x402 is enabled: simplified view ── */
+                <>
+                  <div className="rounded-xl border border-cyan-500/25 bg-cyan-500/5 p-4 mb-6">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-sm">⚡</span>
+                      <p className="text-sm font-semibold text-white">x402 handles billing automatically</p>
+                    </div>
+                    <p className="text-xs text-zinc-400 leading-relaxed">
+                      Every API call triggers an HTTP 402 challenge. The buyer's agent pays <strong className="text-cyan-300">{Number(form.x402Price || form.unitPrice).toFixed(4)} USDC</strong> per call on Arbitrum, then retries to get the response. No subscriptions, no invoices — pure agent-to-agent micropayment.
+                    </p>
+                    <p className="text-[11px] text-zinc-500 mt-2">
+                      The marketplace listing price is synced to your x402 price so prepaid purchases and direct API calls stay consistent.
+                    </p>
+                  </div>
+
+                  <div className="grid md:grid-cols-2 gap-5">
+                    <div>
+                      <label htmlFor="svc-price-x402" className="block text-xs font-medium text-zinc-400 mb-1.5">
+                        Price per call (USDC) <span className="text-red-400">*</span>
+                      </label>
+                      <div className="relative">
+                        <input
+                          id="svc-price-x402"
+                          type="number"
+                          min="0"
+                          step="any"
+                          inputMode="decimal"
+                          value={form.unitPrice}
+                          onChange={(e) => setForm((f) => ({ ...f, unitPrice: e.target.value, x402Price: e.target.value }))}
+                          className={`${input} pr-12 ${priceValid ? 'border-emerald-800/60' : ''}`}
+                        />
+                        <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-bold text-zinc-500">USDC</span>
+                      </div>
+                      <p className="text-[11px] text-zinc-500 mt-1.5">Synced with your x402 price from Step 1.</p>
+                      {!priceValid && <p className="text-[11px] text-red-400 mt-1">Enter an amount greater than zero.</p>}
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-zinc-400 mb-1.5">Billing model</p>
+                      <div className="rounded-xl border border-cyan-800/40 bg-cyan-950/20 p-3">
+                        <p className="text-sm font-medium text-cyan-300">🔁 Per Request — x402</p>
+                        <p className="text-[11px] text-zinc-500 mt-1">Automatically selected. Each API call = one payment.</p>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                /* ── x402 disabled: full pricing model picker ── */
+                <>
+                  <div className="mb-6">
+                    <p className="text-xs font-medium text-zinc-400 mb-1.5">Pricing model <span className="text-red-400">*</span></p>
+                    <div className="grid sm:grid-cols-2 gap-2">
+                      {Object.entries(PRICING_META).map(([key, p]) => (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => setForm((f) => ({ ...f, pricingModel: key }))}
+                          className={`text-left rounded-xl border p-3 transition-all ${
+                            form.pricingModel === key
+                              ? 'bg-blue-600/10 border-blue-700/70 ring-1 ring-blue-600/40'
+                              : 'bg-zinc-950/40 border-zinc-800 hover:border-zinc-700'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="text-base leading-none">{p.icon}</span>
+                            <span className={`text-sm font-medium ${form.pricingModel === key ? 'text-blue-300' : 'text-zinc-100'}`}>{p.title}</span>
+                            {form.pricingModel === key && <FiCheck className="ml-auto text-blue-400" size={14} />}
+                          </div>
+                          <p className="text-[11px] text-zinc-500 mt-1 leading-snug">{p.desc}</p>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="grid md:grid-cols-2 gap-5">
+                    <div>
+                      <label htmlFor="svc-price" className="block text-xs font-medium text-zinc-400 mb-1.5">
+                        Unit price (USDC) <span className="text-red-400">*</span>
+                      </label>
+                      <div className="relative">
+                        <input
+                          id="svc-price"
+                          type="number"
+                          min="0"
+                          step="any"
+                          inputMode="decimal"
+                          value={form.unitPrice}
+                          onChange={(e) => setForm((f) => ({ ...f, unitPrice: e.target.value }))}
+                          className={`${input} pr-12 ${priceValid ? 'border-emerald-800/60' : ''}`}
+                        />
+                        <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-bold text-zinc-500">USDC</span>
+                      </div>
+                      <p className="text-[11px] text-zinc-500 mt-1.5">
+                        Buyers will pay this amount per {form.unitLabel || priceLabel(form.pricingModel)}.
+                      </p>
+                      {!priceValid && <p className="text-[11px] text-red-400 mt-1">Enter an amount greater than zero.</p>}
+                    </div>
+
+                    <div>
+                      <p className="text-xs font-medium text-zinc-400 mb-1.5">Unit label</p>
+                      <div className="flex flex-wrap gap-1.5 mb-2">
+                        {UNIT_CHIPS.map((u) => (
+                          <button
+                            key={u}
+                            type="button"
+                            onClick={() => setForm((f) => ({ ...f, unitLabel: u }))}
+                            className={`px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors ${
+                              form.unitLabel === u
+                                ? 'bg-blue-600/15 text-blue-300 border-blue-700/60'
+                                : 'text-zinc-400 border-zinc-800 hover:border-zinc-700 hover:text-white'
+                            }`}
+                          >
+                            {u}
+                          </button>
+                        ))}
+                      </div>
+                      <input value={form.unitLabel} onChange={set('unitLabel')} placeholder="e.g. page, call, seat" className={input} maxLength={60} />
+                      <p className="text-[11px] text-zinc-500 mt-1.5">Pick a suggested unit or type your own.</p>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-950/50 px-4 py-3 flex items-center justify-between">
+                <span className="text-sm text-zinc-400">Price preview</span>
+                <span className="text-gradient font-black text-lg">
+                  {priceValid ? Number(form.unitPrice).toFixed(4) : '0.0000'} USDC <span className="text-xs font-medium text-zinc-500">/ {form.unitLabel.trim() || priceLabel(form.pricingModel)}</span>
+                </span>
+              </div>
+            </section>
+          )}
+
+          {step === 2 && (
+            <section className="bg-zinc-900/60 border border-zinc-800 rounded-2xl p-6" style={{ borderRadius: 16 }}>
+               <div className="flex items-start justify-between gap-4 mb-5">
+                 <div>
+                   <h2 className="text-[15px] font-semibold text-white mb-1">Review and publish</h2>
+                   <p className="text-xs text-zinc-400">Confirm the listing, then choose the agent that receives settlement.</p>
+                 </div>
+                 <span className="shrink-0 rounded-full border border-zinc-800 bg-zinc-950/60 px-2.5 py-1 text-[10px] font-medium text-zinc-500">3 of 3</span>
+               </div>
+               <div className="mb-5 grid sm:grid-cols-2 gap-2">
+                 <div className="rounded-xl border border-zinc-800 bg-zinc-950/50 p-3">
+                   <p className="text-[10px] uppercase tracking-wide text-zinc-600">Listing</p>
+                   <p className="mt-1 truncate text-sm font-medium text-white">{preview.title}</p>
+                   <p className="mt-1 text-[11px] text-zinc-500">{preview.cat?.title || form.category}</p>
+                 </div>
+                 <div className="rounded-xl border border-zinc-800 bg-zinc-950/50 p-3">
+                   <p className="text-[10px] uppercase tracking-wide text-zinc-600">Price</p>
+                   <p className="mt-1 text-sm font-medium text-white">{priceValid ? Number(form.unitPrice).toFixed(4) : '0.0000'} USDC</p>
+                   <p className="mt-1 text-[11px] text-zinc-500">per {form.unitLabel.trim() || priceLabel(form.pricingModel)}</p>
+                 </div>
+               </div>
+               <p className="text-xs text-zinc-400 mb-5">
+                 Publishing agent
+                 {agents.length > 0 && form.agentId && !editing && (
+                   <span className="text-emerald-400"> Auto-selected — you can switch below.</span>
+                 )}
+              </p>
+
+              {agentsState.loading && !agents.length ? (
+                <div className="space-y-2"><Skeleton className="h-20 rounded-xl" /><Skeleton className="h-20 rounded-xl" /></div>
+              ) : agents.length === 0 ? (
+                <div className="rounded-xl border border-amber-900/60 bg-amber-950/20 p-4">
+                  <p className="text-sm font-medium text-amber-300">No agents in this workspace</p>
+                  <p className="text-xs text-zinc-400 mt-1">Create an agent first — it mints the wallet that receives marketplace payments.</p>
+                  <button type="button" onClick={() => navigate('/developer/agents')} className="mt-3 inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium px-3 py-2 rounded-lg transition-colors">
+                    <FiCpu size={13} /> Create agent
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {agents.map((a) => {
+                    const active = form.agentId === a.agentId;
+                    return (
+                      <button
+                        key={a.agentId}
+                        type="button"
+                        onClick={() => setForm((f) => ({ ...f, agentId: a.agentId, unitPrice: f.unitPrice || '0.01' }))}
+                        className={`w-full text-left rounded-xl border p-4 transition-all ${
+                          active ? 'bg-blue-600/10 border-blue-700/70 ring-1 ring-blue-600/40'
+                          : 'bg-zinc-950/40 border-zinc-800 hover:border-zinc-700'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="h-9 w-9 rounded-lg bg-zinc-800 flex items-center justify-center text-base">🤖</div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className={`text-sm font-medium truncate ${active ? 'text-blue-300' : 'text-zinc-100'}`}>{a.name || a.agentId}</span>
+                              {a.status === 'suspended' && <Pill tone="red">suspended</Pill>}
+                            </div>
+                            <p className="font-mono text-[11px] text-zinc-500 truncate">{a.wallet ? `${a.wallet.slice(0, 8)}…${a.wallet.slice(-6)}` : 'no wallet'}</p>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <p className="text-sm font-bold text-white">{a.balance != null ? `${a.balance}` : '—'} <span className="text-[10px] text-zinc-500 font-normal">USDC</span></p>
+                            <p className="text-[11px] text-zinc-500">{activeCountByAgent[a.agentId] || 0} active service{(activeCountByAgent[a.agentId] || 0) === 1 ? '' : 's'}</p>
+                          </div>
+                          <span className={`ml-2 shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                            active ? 'bg-blue-600 text-white' : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
+                          }`}>
+                            {active ? <FiCheck size={12} /> : 'Select'}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+
+              <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-950/50 p-4">
+                <p className="text-xs font-medium text-zinc-300 mb-3 flex items-center gap-2"><FiTrendingUp size={13} className="text-violet-400" /> Before publishing</p>
+                <ul className="space-y-1.5">
+                  {checks.map((c) => (
+                    <li key={c.label} className="flex items-center gap-2 text-xs">
+                      <span className={c.ok ? 'text-emerald-400' : c.optional ? 'text-zinc-600' : 'text-zinc-600'}>
+                        <FiCheckCircle className={c.ok ? '' : 'opacity-40'} size={13} />
+                      </span>
+                      <span className={c.ok ? 'text-zinc-300' : c.optional ? 'text-zinc-500' : 'text-zinc-500'}>{c.label}</span>
+                      {c.ok && <FiCheck size={11} className="text-emerald-500" />}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              <div className="mt-5 rounded-xl border border-zinc-800 bg-zinc-950/50 p-4 text-xs text-zinc-400 space-y-1.5">
+                <p className="text-[11px] uppercase tracking-wide text-zinc-500 font-medium mb-2">After publishing</p>
+                <p>• Buyers can discover your service immediately.</p>
+                <p>• Payments are settled automatically to the agent wallet.</p>
+                <p>• Usage creates invoices, metered and on-chain verified.</p>
+              </div>
+            </section>
+          )}
+
+          <div className="flex items-center justify-between gap-3">
+            <button type="button" onClick={goBack} className="inline-flex items-center gap-2 text-sm text-zinc-400 hover:text-white px-3 py-2 transition-colors">
+              <FiArrowLeft size={14} /> {step === 0 ? 'Back to services' : 'Back'}
+            </button>
+            <div className="flex items-center gap-2">
+              {step === 2 && (
+                <button type="button" onClick={() => navigate('/developer/marketplace/services')} className="text-sm text-zinc-400 hover:text-white px-3 py-2 transition-colors" disabled={saving}>
+                  Cancel
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={goNext}
+                disabled={step === 2 ? !allReady : !stepValid}
+                className="inline-flex items-center gap-2 text-sm font-semibold px-5 py-2.5 rounded-lg transition-colors bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white"
+              >
+                {step === 0 ? 'Continue' : null}
+                {step === 1 ? 'Continue to review' : null}
+                {step === 2 ? (
+                  saving ? 'Publishing…' : (
+                    <>
+                      🚀 Publish to Marketplace
+                    </>
+                  )
+                ) : <FiArrowRight size={14} />}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Right — live preview column */}
+        <aside className="hidden lg:block">
+          <div className="sticky top-6 space-y-4">
+            <div className="rounded-2xl border border-zinc-800 bg-zinc-950/60 overflow-hidden">
+              <div className="px-4 py-2.5 border-b border-zinc-800/80 flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wide text-zinc-500 font-medium">Live marketplace preview</span>
+                <span className="h-2 w-2 rounded-full bg-emerald-500" />
+              </div>
+              <div className="p-4" style={{ minHeight: 260 }}>
+                <div className="flex items-center justify-between mb-3">
+                  <Pill tone={step === 0 ? 'blue' : 'blue'}>{preview.cat?.title || form.category}</Pill>
+                  {!editing && <Pill tone="amber"><FiTrendingUp size={11} /> New</Pill>}
+                </div>
+                <h3 className="text-sm font-semibold text-zinc-100 truncate">{preview.title}</h3>
+                <p className="text-xs text-zinc-500 mt-1.5 mb-4 line-clamp-4" style={{ minHeight: 40 }}>{preview.desc}</p>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-gradient font-black text-lg">{priceValid ? Number(form.unitPrice).toFixed(4) : '0.0000'}</span>
+                    <span className="text-xs text-zinc-500"> USDC / {form.unitLabel.trim() || priceLabel(form.pricingModel)}</span>
+                    {form.requireX402 && (
+                      <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-cyan-500/15 px-2 py-0.5 text-[10px] font-semibold text-cyan-400">⚡ x402</span>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    disabled
+                    className="inline-flex items-center gap-1.5 bg-blue-600 text-white text-xs font-medium px-3 py-2 rounded-lg opacity-60 cursor-not-allowed"
+                  >
+                    <FiShoppingBag size={13} /> Buy
+                  </button>
+                </div>
+                <div className="flex items-center justify-between gap-2 mt-3 pt-3 border-t border-zinc-800/70">
+                  <p className="text-[11px] text-zinc-600 font-mono truncate">
+                    Published by {selectedAgent?.name || 'your agent'}
+                  </p>
+                  <FiCheckCircle size={13} className="text-emerald-500 shrink-0" />
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
+              <p className="text-[11px] uppercase tracking-wide text-zinc-500 font-medium mb-3">Price preview</p>
+              <p className="text-xl font-black text-gradient">
+                {priceValid ? Number(form.unitPrice).toFixed(4) : '0.0000'} USDC
+                <span className="text-xs font-medium text-zinc-500"> / {form.unitLabel.trim() || priceLabel(form.pricingModel)}</span>
+              </p>
+              {form.requireX402 ? (
+                <p className="text-[11px] text-cyan-400 mt-1.5">⚡ x402 per-call micropayment — agent auto-pays on Arbitrum</p>
+              ) : (
+                <p className="text-[11px] text-zinc-500 mt-1.5">{PRICING_META[form.pricingModel]?.title} — {PRICING_META[form.pricingModel]?.desc}</p>
+              )}
+            </div>
+
+            <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 text-[11px] text-zinc-400 space-y-1.5">
+              <p className="text-[11px] uppercase tracking-wide text-zinc-500 font-medium mb-2">Need help?</p>
+              <p>• Buyers discover services through Network Discovery.</p>
+              <p>• The marketplace handles billing, invoices, and settlement.</p>
+              <p>• You can deactivate a listing anytime from My Services.</p>
+              <a href="/developer/docs" className="inline-block mt-2 text-blue-400 hover:text-blue-300 font-medium">Read marketplace docs →</a>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </div>
+  );
+};
+
+export default DevPublishService;
