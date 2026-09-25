@@ -178,7 +178,7 @@ const handlePurchase = async (text, { consumerAgentId, developerId, organization
       return { message: `Payment failed: ${msg}. The Trust Engine recommendation stands — try again when funds are available.`, steps: tracker.steps, answer: graphResult.answer };
     }
 
-    tracker.add('act', 'Settling on Base Sepolia', `Executing wallet-signed payment via ArbiterPaymentManager...`);
+    tracker.add('act', 'Settling on Arbitrum Sepolia', `Executing wallet-signed payment via ArbiterPaymentManager...`);
     let result;
     try {
       result = await confirmPrepaidPurchase({ sessionId: intent.session.sessionId, organizationId });

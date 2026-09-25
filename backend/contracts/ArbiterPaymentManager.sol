@@ -15,10 +15,10 @@ interface IERC20 {
  *  - ERC20 path (settleInvoiceToken / releaseToken): the caller must have
  *    approved `token` for at least `amount` before settleInvoiceToken; funds
  *    move from msg.sender into this contract via transferFrom, and are paid to
- *    the receiver on release. Used on chains where USDC is an ERC20 (Base...).
+ *    the receiver on release. Used on chains where USDC is an ERC20 (e.g.
+ *    Arbitrum Sepolia).
  *
- * KeeperHub rail (Base Sepolia) uses the ERC20 path with Circle USDC:
- *   0x036CbD53842c5426634e7929541eC2318f3dCF7e
+ * Primary deployment: Arbitrum Sepolia (chain 421614) via deployArbiter.js.
  */
 contract ArbiterPaymentManager {
     enum PaymentType { DIRECT, SCHEDULED, ESCROW, INVOICE, REQUEST }
@@ -100,7 +100,7 @@ contract ArbiterPaymentManager {
         _create(id, PaymentType.REQUEST, receiver, 0, bytes32(0));
     }
 
-    // ---------------- ERC20 (e.g. USDC on Base Sepolia) ----------------
+    // ---------------- ERC20 (e.g. USDC on Arbitrum Sepolia) ----------------
 
     function settleInvoiceToken(bytes32 id, address receiver, bytes32 invoiceRef, address token, uint256 amount) external {
         require(!payments[id].exists, "ID exists");

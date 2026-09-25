@@ -65,10 +65,10 @@ async function deploy() {
 
         const contractData = { address, abi };
         // The Arc scheduled-payment worker reads globalPayData.json against the
-        // Arc RPC — only clobber it when actually deploying to Arc. Base Sepolia
+        // Arc RPC — only clobber it when actually deploying to Arc. Arbitrum Sepolia
         // (KeeperHub rail) deployments go to a separate file.
-        const isBaseSepolia = String(rpcUrl).includes('sepolia.base.org');
-        const outFile = isBaseSepolia ? './globalPayData.keeperhub.json' : './globalPayData.json';
+        const isArbSepolia = String(rpcUrl).includes('sepolia-rollup.arbitrum.io');
+        const outFile = isArbSepolia ? './globalPayData.arbitrum.json' : './globalPayData.json';
         fs.writeFileSync(outFile, JSON.stringify(contractData, null, 2));
         console.log(`Saved to ${outFile}`);
 

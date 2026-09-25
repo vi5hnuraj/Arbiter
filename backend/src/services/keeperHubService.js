@@ -38,7 +38,7 @@ const EXECUTION_RAIL = () => (process.env.EXECUTION_RAIL || 'arc').toLowerCase()
 const KEEPERHUB_API_KEY = () => process.env.KEEPERHUB_API_KEY || '';
 const KEEPERHUB_BASE_URL = () => (process.env.KEEPERHUB_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, '');
 
-/** Default settle chain for the KeeperHub rail (Base Sepolia = 421614). */
+/** Default settle chain for the alternate rail (chain id 421614 = Arbitrum Sepolia). */
 export const KEEPERHUB_CHAIN_ID = () => process.env.KEEPERHUB_CHAIN_ID || '421614';
 
 export const isKeeperHubConfigured = () => {
