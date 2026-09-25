@@ -117,14 +117,36 @@ describe("ArbiterManager", function () {
     expect(await token.balanceOf(await manager.getAddress())).to.equal(0n);
   });
 
-  it("ending 3: buyer rejects before deadline -> full refund", async () => {
+  it("ending 3: buyer rejects UNDELIVERED work before deadline -> full refund", async () => {
     const id = await openEscrow();
-    await deliver(id);
+    // no deliver() — service never arrived
     await manager.connect(consumer).rejectDelivery(id);
 
     const p = await manager.getPayment(id);
     expect(p[1]).to.equal(3n); // CANCELLED
     expect(await token.balanceOf(consumer.address)).to.equal(1000e6);
+  });
+
+  it("security: delivered work can never be rejected (use-then-refund blocked)", async () => {
+    const id = await openEscrow();
+    await deliver(id); // buyer has already received the goods
+    await expect(manager.connect(consumer).rejectDelivery(id))
+      .to.be.revertedWithCustomError(manager, "AlreadyDelivered");
+    // escrow still HELD — provider's delivery proof stands; only approve/split/deadline remain
+    const p = await manager.getPayment(id);
+    expect(p[1]).to.equal(1n);
+    expect(await token.balanceOf(consumer.address)).to.equal(999_000_000n); // no refund
+  });
+
+  it("security: partial split cannot zero the provider (25% floor)", async () => {
+    const id = await openEscrow();
+    await deliver(id);
+    // 249_999 = 24.9999% < 25% floor -> BadSplit
+    await expect(manager.connect(consumer).approveDeliveryPartial(id, 249_999n))
+      .to.be.revertedWithCustomError(manager, "BadSplit");
+    // exactly 25% passes
+    await manager.connect(consumer).approveDeliveryPartial(id, 250_000n);
+    expect(await token.balanceOf(provider.address)).to.equal(250_000n);
   });
 
   it("ending 4a: delivered + silence -> ANYONE auto-resolves, provider paid", async () => {
@@ -153,8 +175,14 @@ describe("ArbiterManager", function () {
     await deliver(id);
     await expect(manager.connect(consumer).autoResolve(id)).to.be.revertedWithCustomError(manager, "WindowOpen");
     await time.increase(61);
-    await expect(manager.connect(consumer).rejectDelivery(id)).to.be.revertedWithCustomError(manager, "WindowClosed");
+    await expect(manager.connect(consumer).rejectDelivery(id)).to.be.revertedWithCustomError(manager, "WindowClosed"); // WindowClosed checked before AlreadyDelivered
     await manager.connect(bystander).autoResolve(id);
+  });
+
+  it("reject too late while undelivered also reverts", async () => {
+    const id = await openEscrow(60);
+    await time.increase(61);
+    await expect(manager.connect(consumer).rejectDelivery(id)).to.be.revertedWithCustomError(manager, "WindowClosed");
   });
 
   it("approve without delivery reverts with NotDelivered", async () => {

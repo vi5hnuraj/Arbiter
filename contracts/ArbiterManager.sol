@@ -19,11 +19,11 @@ interface AggregatorV3Interface {
 /**
  * Arbiter Arbitrum Manager — settlement escrow for agent commerce on Arbitrum.
  *
- * Ported from ArbiterPaymentManager (Base Sepolia) for the Arbitrum Open House
- * Singapore Buildathon. Same escrow lifecycle (PENDING/HELD -> RELEASED/CANCELLED),
- * same ERC20 + native paths, so the existing Arbiter backend maps 1:1.
+ * Ported from ArbiterPaymentManager (Base Sepolia) to Arbitrum. Same escrow
+ * lifecycle (PENDING/HELD -> RELEASED/CANCELLED), same ERC20 + native paths, so
+ * the existing Arbiter backend maps 1:1.
  *
- * NEW in this Buildathon version:
+ * NEW in this Arbitrum version:
  *
  *   1. ⭐ Chainlink-priced USD settlement: services are priced in USD cents; the
  *      contract converts to USDC at the live Chainlink rate, with staleness and
@@ -32,7 +32,8 @@ interface AggregatorV3Interface {
  *   2. ⭐ Review-window escrow with four endings (ERC20 path, pType == ESCROW):
  *         - approveDelivery:        buyer releases held funds to the provider
  *         - approveDeliveryPartial: buyer pays a share, the remainder auto-refunds
- *         - rejectDelivery:         buyer refunds itself before the deadline
+ *         - rejectDelivery:         buyer refunds itself before the deadline while
+ *                                   undelivered; delivered work can never be rejected
  *         - autoResolve:            permissionless, after the deadline — delivered
  *                                   work is paid, undelivered work is refunded.
  *                                   Silence is never a veto for either side.
@@ -306,22 +307,28 @@ contract ArbiterManager {
 
     /// @notice Buyer approves part of the delivered work: `toProvider` goes to the
     ///         provider and the remainder auto-refunds the buyer. Real disputes are
-    ///         rarely all-or-nothing. Requires delivery.
+    ///         rarely all-or-nothing. Requires delivery. The provider's share is
+    ///         floored at 25% so a split can never zero out delivered work either.
     function approveDeliveryPartial(bytes32 id, uint256 toProvider) external {
         Payment storage p = _loadHeldEscrow(id);
         if (msg.sender != p.sender) revert NotBuyer();
         if (!p.delivered) revert NotDelivered();
         if (toProvider > p.amount) revert BadSplit();
+        if (toProvider * 4 < p.amount) revert BadSplit(); // >= 25% floor for delivered work
         uint256 toBuyer = p.amount - toProvider; // capture BEFORE the state flip
         _resolveEscrow(id, p, Outcome.PARTIAL, p.receiver, toProvider);
         emit DeliveryApproved(id, msg.sender, toProvider, toBuyer);
     }
 
-    /// @notice Buyer rejects before the deadline: full refund to the buyer.
+    /// @notice Buyer rejects UNDELIVERED work before the deadline: full refund.
+    ///         Once work is delivered the buyer's only exits are approveDelivery,
+    ///         approveDeliveryPartial (provider floor 25%), or the deadline — a
+    ///         use-then-refund (consume the goods, then vanish the payment) reverts.
     function rejectDelivery(bytes32 id) external {
         Payment storage p = _loadHeldEscrow(id);
         if (msg.sender != p.sender) revert NotBuyer();
         if (block.timestamp >= p.deadline) revert WindowClosed();
+        if (p.delivered) revert AlreadyDelivered();
         _resolveEscrow(id, p, Outcome.REJECTED, p.sender, p.amount);
         emit DeliveryRejected(id, msg.sender, p.amount);
     }
