@@ -405,11 +405,14 @@ export const developerApi = {
   arbiterInfo: () => request('/arbiter/info'),
   arbiterEngagements: () => request('/arbiter/engagements'),
   arbiterReputation: () => request('/arbiter/reputation'),
-  arbiterEngagementDemo: (usdCents) =>
-    request('/arbiter/engagement-demo/run', { method: 'POST', body: JSON.stringify({ usdCents }) }),
+  arbiterEngagementDemo: (usdCents, serviceId, service) =>
+    // 5 real on-chain txs (propose → accept → fund → deliver → approve) can take
+    // 30–75s on Arbitrum Sepolia — the default 20s timeout aborts mid-contract.
+    request('/arbiter/engagement-demo/run', { method: 'POST', body: JSON.stringify({ usdCents, serviceId, service }), timeout: 180000 }),
   arbiterHeldDemo: (usdCents, serviceId, buyerAgentId, settlementToken) =>
     request('/arbiter/held-demo/start', { method: 'POST', body: JSON.stringify({ usdCents, serviceId, buyerAgentId, settlementToken }) }),
   arbiterHeldStatus: (escrowId) => request(`/x402/held/${escrowId}`),
+  arbiterHeldJobs: () => request('/x402/held'),
   arbiterHeldDecide: (escrowId, action, extra) =>
     request(`/x402/held/${escrowId}/${action}`, {
       method: 'POST',
