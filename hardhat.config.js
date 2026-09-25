@@ -14,7 +14,7 @@ module.exports = {
     },
   },
   networks: {
-    // Arbitrum Sepolia testnet — required by the Buildathon rules.
+    // Arbitrum Sepolia testnet — primary deployment network.
     arbitrumSepolia: {
       url: process.env.ARB_SEPOLIA_RPC || "https://sepolia-rollup.arbitrum.io/rpc",
       chainId: 421614,
