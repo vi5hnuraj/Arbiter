@@ -3,7 +3,8 @@
 .playwright/
 .freebuff/
 .well-known/
-*_cover.html
+buidl-cover.html
+buidl_cover.html
 buildathon-form-answers.html
 
 # Agent-native recipe library (external tooling, not part of the platform)
