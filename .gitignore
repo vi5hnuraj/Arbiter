@@ -1,6 +1,27 @@
 # Internal tooling
 .shannon/
 .playwright/
+.freebuff/
+.well-known/
+*_cover.html
+buildathon-form-answers.html
+
+# Agent-native recipe library (external tooling, not part of the platform)
+bazantic-recipes/
+bazantic-recipe.json
+
+# Local documentation drafts (kept out of the published repo)
+README.md
+SUBMISSION.md
+docs/
+backend/mcp/README.md
+
+# Demo scripts tied to the external recipe library
+scripts/ai-assistant-demo.mjs
+scripts/bazantic-agent-demo.mjs
+
+# Escrow demo runtime history (regenerated per run)
+backend/heldJobs.json
 
 # Data directories (MPC shares, wallet data, transactions)
 data/
