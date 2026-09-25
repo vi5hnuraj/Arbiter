@@ -15,7 +15,7 @@
 import { Router } from 'express';
 import { ethers } from 'ethers';
 import logger from '../utils/logger.js';
-import { buildHeldChallenge } from '../services/heldService.js';
+import { buildHeldChallenge, rememberHeldBuyer } from '../services/heldService.js';
 import { getMarketplaceService } from '../services/marketplaceService.js';
 import { supabase } from '../config/supabaseClient.js';
 import { getWalletService } from '../wallets/walletService.js';
@@ -26,7 +26,7 @@ const RPC = () => process.env.ARC_RPC_URL || 'https://sepolia-rollup.arbitrum.io
 const MANAGER = () => process.env.MANAGER_ADDRESS || process.env.ARBITER_MANAGER_ADDRESS || '';
 const USDC = () => process.env.USDC_CONTRACT_ADDRESS || '0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d';
 /**
- * Paxos USDG (Global Dollar) — the Buildathon bonus-criterion stablecoin.
+ * Paxos USDG (Global Dollar) — optional second settlement stablecoin.
  * Default is the verified Arbitrum One proxy; set USDG_CONTRACT_ADDRESS to the
  * testnet address of the ACTIVE network before running a USDG settlement there.
  */
@@ -57,6 +57,7 @@ const MANAGER_ABI = [
   'event EngagementProposed(bytes32 indexed id, address indexed client, address indexed provider, bytes32 termsHash, uint256 usdCents, uint256 deadline)',
   'event EngagementAccepted(bytes32 indexed id, address indexed provider, bytes32 termsHash, uint256 at)',
   'event EngagementFunded(bytes32 indexed id, address indexed client, uint256 amount, int256 price)',
+  'event SettlementCompleted(bytes32 indexed id, address indexed sender, address indexed receiver, uint256 amount, address token, uint8 outcome, bool onTime)',
 ];
 
 const ERC20_ABI = [
@@ -139,10 +140,17 @@ router.get('/engagements', async (req, res) => {
       const to = Math.min(from + 49_999, latest);
       proposed.push(...(await m.queryFilter(m.filters.EngagementProposed(), from, to)));
     }
-    const [accepted, funded] = await Promise.all([
+    const [accepted, funded, settled] = await Promise.all([
       m.queryFilter(m.filters.EngagementAccepted(), DEPLOY_BLOCK, 'latest').catch(() => []),
       m.queryFilter(m.filters.EngagementFunded(), DEPLOY_BLOCK, 'latest').catch(() => []),
+      // Authoritative settlement truth: the escrow resolver flips payment status
+      // and increments reputation, but leaves EngagementStatus at FUNDED — so
+      // derive SETTLED/CANCELLED for display from SettlementCompleted outcomes.
+      m.queryFilter(m.filters.SettlementCompleted(), DEPLOY_BLOCK, 'latest').catch(() => []),
     ]);
+    // Outcome enum: 0 NONE, 1 APPROVED, 2 PARTIAL, 3 REJECTED, 4 AUTO_DELIVERED, 5 AUTO_REFUNDED
+    const OUTCOME_STYLE = { 1: 'SETTLED', 2: 'SETTLED', 4: 'SETTLED', 3: 'CANCELLED', 5: 'CANCELLED' };
+    const settledMap = new Map(settled.map((e) => [e.args.id, OUTCOME_STYLE[Number(e.args.outcome)]]));
     const acceptedIds = new Set(accepted.map((e) => e.args.id));
     const fundedMap = new Map(funded.map((e) => [e.args.id, e.args]));
     const items = [];
@@ -155,6 +163,7 @@ router.get('/engagements', async (req, res) => {
         status = ENGAGEMENT_STATUS[Number(g[0])] || status;
         onchain = { funded: g[7], deadline: Number(g[5]) };
       } catch { /* keep event-derived status */ }
+      if (settledMap.has(id)) status = settledMap.get(id); // settlement event is the truth
       const f = fundedMap.get(id);
       items.push({
         id,
@@ -163,6 +172,7 @@ router.get('/engagements', async (req, res) => {
         provider: prov,
         usd: (Number(usdCents) / 100).toFixed(2),
         termsHash,
+        service: engagementTerms.get(id)?.service || null,
         status,
         amount: f ? ethers.formatUnits(f.amount, 6) : null,
         chainlinkPrice: f ? ethers.formatUnits(f.price, 8) : null,
@@ -181,9 +191,31 @@ router.get('/engagements', async (req, res) => {
   }
 });
 
+// Readable terms for one engagement (the chain stores only the hash).
+router.get('/engagement-terms/:id', (req, res) => {
+  const t = engagementTerms.get(String(req.params.id));
+  if (!t) return res.status(404).json({ message: 'No readable terms recorded for this engagement id.' });
+  return res.json(t);
+});
+
 // ── 3. Full Pact-cycle demo: propose → accept → fund → deliver → approve ────
+// Plaintext terms for engagements created through this console. The chain
+// stores only the terms HASH (that's the tamper-proof part); the readable
+// description lives here so the UI can show WHAT both parties signed.
+const engagementTerms = new Map();
+
 router.post('/engagement-demo/run', async (req, res) => {
-  const usdCents = Math.max(1, Math.min(500, Number(req.body?.usdCents) || 25));
+  const usdCents = Math.max(1, Math.min(100_000, Number(req.body?.usdCents) || 25));
+  // The contracted service: resolved from the live marketplace by serviceId
+  // (authoritative title from the DB), falling back to any client-provided text.
+  let service = '';
+  if (req.body?.serviceId) {
+    try {
+      const { data, error } = await supabase.from('ai_services').select('title').eq('service_id', String(req.body.serviceId)).maybeSingle();
+      if (!error && data?.title) service = String(data.title).slice(0, 120);
+    } catch { /* fall through to client text */ }
+  }
+  if (!service) service = String(req.body?.service || '').trim().slice(0, 120) || 'Website design & build';
   const steps = [];
   try {
     if (!MANAGER()) throw new Error('MANAGER_ADDRESS not configured');
@@ -211,11 +243,12 @@ router.post('/engagement-demo/run', async (req, res) => {
     }
 
     const id = ethers.keccak256(ethers.toUtf8Bytes(`arbiter:engagement-demo:${Date.now()}:${ethers.hexlify(ethers.randomBytes(4))}`));
-    const terms = JSON.stringify({ service: 'console-demo', usdCents, createdAt: Date.now() });
+    const terms = JSON.stringify({ service, usdCents, createdAt: Date.now() });
     const termsHash = ethers.keccak256(ethers.toUtf8Bytes(terms));
+    engagementTerms.set(id, { service, usdCents });
 
     const t1 = await (await mBuyer.proposeEngagement(id, seller.address, token, usdCents, 0, termsHash)).wait();
-    steps.push({ step: 'propose', txHash: t1.hash, detail: `termsHash ${short(termsHash)}` });
+    steps.push({ step: 'propose', txHash: t1.hash, detail: `"${service}" · termsHash ${short(termsHash)}` });
 
     const t2 = await (await mSeller.acceptEngagement(id, termsHash)).wait();
     steps.push({ step: 'accept (mutual signature)', txHash: t2.hash });
@@ -235,6 +268,8 @@ router.post('/engagement-demo/run', async (req, res) => {
     return res.json({
       engagementId: id,
       engagementIdShort: short(id),
+      service,
+      termsHash,
       steps,
       reputation: rep.toString(),
       arbiscan: steps.map((s) => `https://sepolia.arbiscan.io/tx/${s.txHash}`),
@@ -255,8 +290,8 @@ router.post('/held-demo/start', async (req, res) => {
     const usdCents = Math.max(1, Math.min(500, Number(req.body?.usdCents) || 50));
     const serviceId = req.body?.serviceId ? String(req.body.serviceId) : null;
     const buyerAgentId = req.body?.buyerAgentId ? String(req.body.buyerAgentId) : null;
-    // Settlement token: 'USDC' (default) or 'USDG' — Paxos Global Dollar, the
-    // Buildathon bonus-criterion stablecoin. The real symbol is verified on-chain.
+    // Settlement token: 'USDC' (default) or 'USDG' — Paxos Global Dollar. The
+    // real symbol is verified on-chain.
     const token = await resolveSettlementToken(req.body?.settlementToken);
     const challenge = await buildHeldChallenge({ endpoint: 'held-demo-panel', priceCents: usdCents, settlementToken: token.kind });
     const p = provider();
@@ -270,13 +305,32 @@ router.post('/held-demo/start', async (req, res) => {
       buyer = { address: data.wallet_address };
     } else buyer = new ethers.Wallet(buyerKey(), p);
     const seller = new ethers.Wallet(sellerKey(), p);
+    // register the buyer's managed wallet id for decision signing (no DB read later)
+    rememberHeldBuyer(challenge.escrowId, { buyerWalletId: buyerAgent?.wallet_id || null, payer: buyer.address });
     const service = serviceId ? await getMarketplaceService(serviceId) : null;
     const selectedProvider = service?.provider?.wallet || seller.address;
-    if (service && selectedProvider.toLowerCase() !== seller.address.toLowerCase()) {
-      throw Object.assign(new Error('The selected marketplace provider is not connected to the demo provider signer. Set PROVIDER_KEY to that provider wallet before running this on-chain demo.'), { status: 409 });
+    const providerIsSeller = selectedProvider.toLowerCase() === seller.address.toLowerCase();
+    // The escrow must pay the wallet the listing advertises, and only that wallet
+    // can commit the delivery evidence. Key-based providers are covered by
+    // PROVIDER_KEY (the seller key); managed (Privy) wallets sign server-side.
+    let providerWalletId = null;
+    if (service && !providerIsSeller) {
+      const { data: agentRow } = await supabase.from('ai_agents').select('wallet_id').ilike('wallet_address', selectedProvider).eq('status', 'active').maybeSingle();
+      let walletId = agentRow?.wallet_id || null;
+      if (!walletId) {
+        const { data: profileRow } = await supabase.from('profiles').select('id').ilike('internal_wallet_address', selectedProvider).maybeSingle();
+        walletId = profileRow?.id || null;
+      }
+      if (!walletId) {
+        throw Object.assign(new Error(`The selected marketplace provider ${selectedProvider} is not a wallet this backend can sign with. Set PROVIDER_KEY to that provider wallet, or publish the listing with a managed wallet, before running this on-chain demo.`), { status: 409 });
+      }
+      if ((await p.getBalance(selectedProvider)) < 100000000000000n) { // 0.0001 ETH — delivery gas
+        throw Object.assign(new Error(`The provider wallet ${selectedProvider} has no ETH for the delivery transaction — fund it with a little Arbitrum Sepolia ETH first.`), { status: 409 });
+      }
+      providerWalletId = walletId;
     }
-    if (seller.address.toLowerCase() === buyer.address.toLowerCase()) {
-      throw new Error('PROVIDER_KEY wallet must differ from the buyer wallet (delivery requires receiver != buyer)');
+    if (selectedProvider.toLowerCase() === buyer.address.toLowerCase()) {
+      throw Object.assign(new Error('The escrow receiver must differ from the buyer wallet — pick a different buyer agent or service for this demo.'), { status: 409 });
     }
     const needed = BigInt(challenge.amount);
 
@@ -301,7 +355,7 @@ router.post('/held-demo/start', async (req, res) => {
 
     // ① buyer settles INTO the escrow contract
     const settleArgs = [
-      challenge.escrowId, seller.address, challenge.escrowId, token.address, usdCents, needed, challenge.escrowId, challenge.extensions.held.reviewSeconds,
+      challenge.escrowId, selectedProvider, challenge.escrowId, token.address, usdCents, needed, challenge.escrowId, challenge.extensions.held.reviewSeconds,
     ];
     let settleTx;
     if (buyerAgent) settleTx = await sendBuyerCall(MANAGER(), managerInterface.encodeFunctionData('settleInvoiceUSDEscrow', settleArgs), `held-settle-${challenge.escrowId}`);
@@ -313,7 +367,20 @@ router.post('/held-demo/start', async (req, res) => {
     // ② seller immediately commits the delivery evidence (buyer reads NOW, decides later)
     const deliverable = { answer: `Held-mode analysis for the console demo ($${(usdCents / 100).toFixed(2)}).`, confidence: 0.82, provider: 'arbiter-research-agent-v1', generatedAt: new Date().toISOString() };
     const evidence = ethers.keccak256(ethers.toUtf8Bytes(JSON.stringify(deliverable)));
-    const drc = await (await manager(seller).markDelivered(challenge.escrowId, evidence)).wait();
+    let drc;
+    if (providerWalletId) {
+      // the LISTED provider's own managed wallet commits the delivery evidence
+      const sent = await getWalletService().sendContractCall({
+        walletId: providerWalletId,
+        to: MANAGER(),
+        data: managerInterface.encodeFunctionData('markDelivered', [challenge.escrowId, evidence]),
+        idempotencyKey: `held-deliver-${challenge.escrowId}`,
+      });
+      await p.waitForTransaction(sent.txHash);
+      drc = { hash: sent.txHash };
+    } else {
+      drc = await (await manager(seller).markDelivered(challenge.escrowId, evidence)).wait();
+    }
 
     return res.json({
       escrowId: challenge.escrowId,
@@ -339,7 +406,7 @@ router.post('/held-demo/start', async (req, res) => {
       status: 'DELIVERED_AWAITING_REVIEW',
     });
   } catch (err) {
-    logger.error('[arbiter] held demo failed:', err.message);
+    logger.error(`[arbiter] held demo failed: ${err.message}`);
     return res.status(err.status || 500).json({ message: err.message });
   }
 });

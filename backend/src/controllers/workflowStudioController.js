@@ -45,7 +45,7 @@ export const studioChaos = async (req, res) => {
     const result = await chaosProbe({ ...studioCtx(req), sessionId: req.params.sessionId });
     return ok(res, {
       message: result.keeperHubRefused
-        ? '🛡️ KeeperHub refused the tampered workflow in simulation — nothing was inferred, nothing was sent.'
+        ? '🛡️ The tampered workflow was refused in simulation — nothing was inferred, nothing was sent.'
         : '⚠️ The tampered workflow simulated clean — investigate before executing.',
       ...result
     });
@@ -62,7 +62,7 @@ export const studioExecute = async (req, res) => {
       const settle = exec.settleTxHash || result.createTxHash;
       const release = exec.releaseTxHash || result.releaseTxHash;
       return ok(res, {
-        message: `⚡ Executed through KeeperHub — settle ${settle ? settle.slice(0, 10) + '…' : '(pending)'}, release ${release ? release.slice(0, 10) + '…' : '(pending)'}.`,
+        message: `⚡ Executed through Arbiter — settle ${settle ? settle.slice(0, 10) + '…' : '(pending)'}, release ${release ? release.slice(0, 10) + '…' : '(pending)'}.`,
         ...result
       });
     }

@@ -9,7 +9,7 @@ function getContractData() {
   const filePath = path.resolve('arbiterData.json');
   if (!fs.existsSync(filePath)) {
     return {
-      address: process.env.ARBITER_MANAGER_ADDRESS || "0x775Ab463A19E51072C61bAe94A0931E00F7caa42",
+      address: process.env.ARBITER_MANAGER_ADDRESS || "0x6b5BA9E3E8175eCfB8291FA0ee358b070c0522Cc",
       abi: [
         {"anonymous":false,"inputs":[{"indexed":true,"internalType":"bytes32","name":"id","type":"bytes32"},{"indexed":true,"internalType":"uint8","name":"pType","type":"uint8"},{"indexed":true,"internalType":"address","name":"sender","type":"address"},{"indexed":false,"internalType":"address","name":"receiver","type":"address"},{"indexed":false,"internalType":"uint256","name":"amount","type":"uint256"},{"indexed":false,"internalType":"uint256","name":"releaseTime","type":"uint256"}],"name":"PaymentCreated","type":"event"}
       ]

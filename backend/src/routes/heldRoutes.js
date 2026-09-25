@@ -15,7 +15,7 @@ import { ethers } from 'ethers';
 import logger from '../utils/logger.js';
 import {
   buildHeldChallenge, openHeldJob, approveHeldJob, rejectHeldJob,
-  partialHeldJob, heldJobStatus, heldStats, isHeldEnabled,
+  partialHeldJob, heldJobStatus, heldStats, isHeldEnabled, listHeldPurchases,
 } from '../services/heldService.js';
 
 const router = Router();
@@ -82,7 +82,21 @@ router.post('/work', async (req, res) => {
   }
 });
 
-// ── 3. Status ────────────────────────────────────────────────────────────────
+// ── 3. Purchase history: every held escrow, newest first ──────────────────
+// Powers the Receipts page's "Held escrow purchases" section — escrow buys
+// are purchases too. Merges persisted rows + live jobs + an incremental
+// ArbiterManager log scan (see listHeldPurchases).
+router.get('/', async (req, res) => {
+  try {
+    return res.json({ escrows: await listHeldPurchases() });
+  } catch (err) {
+    const status = err.status || 500;
+    if (status >= 500) logger.error('[held] listHeldPurchases failed:', err.message);
+    return res.status(status).json({ status, message: err.message });
+  }
+});
+
+// ── 4. Status ────────────────────────────────────────────────────────────────
 router.get('/:escrowId', async (req, res) => {
   try {
     if (!/^0x[0-9a-fA-F]{64}$/.test(req.params.escrowId)) {
@@ -94,7 +108,7 @@ router.get('/:escrowId', async (req, res) => {
   }
 });
 
-// ── 4. Decisions ─────────────────────────────────────────────────────────────
+// ── 5. Decisions ─────────────────────────────────────────────────────────────
 const decision = (fn) => async (req, res) => {
   try {
     return res.json(await fn(req.params.escrowId, req.body?.toProvider));

@@ -56,7 +56,7 @@ router.post('/agent/policy', agentApiKeyMiddleware, async (req, res) => {
 
 /**
  * POST /api/arc/escrow
- * Programmable conditional escrow — off-chain ledger record (hackathon demo).
+ * Programmable conditional escrow — off-chain ledger record (demo mode).
  * Does NOT move on-chain funds; real settlement uses PaymentManager or agentPay.
  */
 router.post('/escrow', agentApiKeyMiddleware, async (req, res) => {
