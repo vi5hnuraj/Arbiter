@@ -158,6 +158,11 @@ const EngagementsPanel = () => {
               </button>
             ))}
           </div>
+          <p className="mt-2 text-[11px] text-zinc-600 max-w-3xl">
+            One shared demo escrow, two wallets: the <span className="text-cyan-400/80 font-medium">client wallet</span> locks and releases the money,
+            the <span className="text-emerald-400/80 font-medium">freelancer wallet</span> delivers and gets paid. The two views are just the two
+            sides of the same story — press Run to perform a real contract live and watch both sides update.
+          </p>
         </div>
         <button type="button" onClick={() => load(true)} className="inline-flex items-center gap-2 border border-zinc-700 text-zinc-300 hover:bg-zinc-800 text-sm font-medium px-3.5 py-2.5 rounded-lg">
           <FiRefreshCw size={14} /> Refresh
@@ -169,7 +174,7 @@ const EngagementsPanel = () => {
         <div className={`bg-zinc-900/60 border rounded-2xl p-4 ${view === 'client' ? 'border-cyan-900/60' : 'border-zinc-800'}`}>
           <div className="flex items-center justify-between gap-2">
             <p className="text-[10px] text-zinc-500 uppercase tracking-wider mb-0.5">The client — {reputation?.buyer?.address ? short(reputation.buyer.address) : '0xD25F8736…'}</p>
-            {view === 'client' && <span className="rounded-full bg-cyan-500/10 border border-cyan-500/30 px-2 py-0.5 text-[9px] font-bold text-cyan-300 uppercase">that's you</span>}
+            {view === 'client' && <span title="All demo contracts are funded from this wallet" className="rounded-full bg-cyan-500/10 border border-cyan-500/30 px-2 py-0.5 text-[9px] font-bold text-cyan-300 uppercase">pays from this wallet</span>}
           </div>
           <p className="text-sm font-semibold text-white">Website client</p>
           <p className="text-[11px] text-zinc-500 mt-2">Locks payment upfront. Approves delivery. Can&apos;t stiff the freelancer — once locked, the money can only go to them.</p>
@@ -192,7 +197,7 @@ const EngagementsPanel = () => {
         <div className={`bg-zinc-900/60 border rounded-2xl p-4 ${view === 'freelancer' ? 'border-emerald-900/60' : 'border-emerald-900/30'}`}>
           <div className="flex items-center justify-between gap-2">
             <p className="text-[10px] text-zinc-500 uppercase tracking-wider mb-0.5">The freelancer — {reputation?.provider?.address ? short(reputation.provider.address) : '0x70997970…'}</p>
-            {view === 'freelancer' && <span className="rounded-full bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 text-[9px] font-bold text-emerald-300 uppercase">that's you</span>}
+            {view === 'freelancer' && <span title="All demo contract releases land in this wallet" className="rounded-full bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 text-[9px] font-bold text-emerald-300 uppercase">gets paid here</span>}
           </div>
           <p className="text-sm font-semibold text-white">Independent developer</p>
           <p className="text-[11px] text-zinc-500 mt-2">Starts work only after the money is locked. Gets paid the moment approval lands. Reputation is portable — not owned by any platform.</p>
