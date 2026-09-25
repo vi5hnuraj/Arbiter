@@ -48,6 +48,18 @@ const EngagementsPanel = () => {
   const [amount, setAmount] = useState('50');
   const [services, setServices] = useState([]);       // live marketplace listings
   const [serviceId, setServiceId] = useState('');     // selected service to contract
+  const [view, setView] = useState('client');         // 'client' | 'freelancer' — whose side you're reading
+
+  const meBuyer = reputation?.buyer?.address?.toLowerCase() || null;
+  const meProvider = reputation?.provider?.address?.toLowerCase() || null;
+  const roleOf = (e) => {
+    if (meBuyer && e.client?.toLowerCase() === meBuyer) return 'client';
+    if (meProvider && e.provider?.toLowerCase() === meProvider) return 'freelancer';
+    return null;
+  };
+  const asClient = (list?.items || []).filter((e) => roleOf(e) === 'client');
+  const asFreelancer = (list?.items || []).filter((e) => roleOf(e) === 'freelancer');
+  const settledUsd = (rows) => rows.filter((e) => e.status === 'SETTLED').reduce((s, e) => s + (Number(e.usd) || 0), 0);
 
   const load = useCallback(async (silent) => {
     if (!silent) setLoading(true);
@@ -113,7 +125,9 @@ const EngagementsPanel = () => {
         byName('deliver'), byName('approve →'),
       ];
       setRun(r);
-      toast.success(`Contract settled — you were paid ${amount} USDC · reputation now ${r.reputation}`);
+      toast.success(view === 'freelancer'
+        ? `Contract settled — the client's ${amount} USDC released to your wallet · reputation now ${r.reputation}`
+        : `Contract settled — you approved and paid ${amount} USDC from escrow`);
       load(true);
     } catch (err) {
       toast.error(err.message || 'Engagement failed');
@@ -128,43 +142,86 @@ const EngagementsPanel = () => {
         <div>
           <h1 className="text-2xl font-bold">Freelance &amp; B2B Contracts</h1>
           <p className="text-sm text-zinc-500 mt-1 max-w-3xl">
-            A client hires you to build a website. No platform taking 20%, no "payment after invoice, maybe".
-            Both parties sign the same terms on-chain, the client locks the money in escrow <em>before</em> you start,
-            and when they approve your work the contract pays you instantly — and your on-chain reputation grows.
+            A client hires a freelancer to build a website. No platform taking 20%, no "payment after invoice, maybe".
+            Both parties sign the same terms on-chain, the client locks the money in escrow <em>before</em> work starts,
+            and approval pays the freelancer instantly — with a permanent on-chain reputation for both sides.
           </p>
+          <div className="mt-3 inline-flex rounded-xl border border-zinc-800 bg-zinc-950/60 p-1" role="tablist">
+            {[
+              ['client', 'Client view', "I'm hiring — I lock & release the escrow"],
+              ['freelancer', 'Freelancer view', "I'm selling — I get paid from escrow"],
+            ].map(([key, label, tip]) => (
+              <button key={key} type="button" title={tip} onClick={() => setView(key)}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                  view === key ? 'bg-cyan-600 text-white shadow' : 'text-zinc-400 hover:text-zinc-200'}`}>
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
         <button type="button" onClick={() => load(true)} className="inline-flex items-center gap-2 border border-zinc-700 text-zinc-300 hover:bg-zinc-800 text-sm font-medium px-3.5 py-2.5 rounded-lg">
           <FiRefreshCw size={14} /> Refresh
         </button>
       </header>
 
-      {/* The two parties */}
+      {/* The two parties — role framing follows the selected view */}
       <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_1fr] gap-3 items-stretch mb-6">
-        <div className="bg-zinc-900/60 border border-zinc-800 rounded-2xl p-4">
-          <p className="text-[10px] text-zinc-500 uppercase tracking-wider mb-1">The client</p>
+        <div className={`bg-zinc-900/60 border rounded-2xl p-4 ${view === 'client' ? 'border-cyan-900/60' : 'border-zinc-800'}`}>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[10px] text-zinc-500 uppercase tracking-wider mb-0.5">The client — {reputation?.buyer?.address ? short(reputation.buyer.address) : '0xD25F8736…'}</p>
+            {view === 'client' && <span className="rounded-full bg-cyan-500/10 border border-cyan-500/30 px-2 py-0.5 text-[9px] font-bold text-cyan-300 uppercase">that's you</span>}
+          </div>
           <p className="text-sm font-semibold text-white">Website client</p>
-          <p className="text-[10px] font-mono text-zinc-600 mt-0.5">{reputation?.buyer?.address || '0xD25F8736…'}</p>
-          <p className="text-[11px] text-zinc-500 mt-2">Locks payment upfront. Approves delivery. Can&apos;t stiff you — can&apos;t reach the money once locked except to pay you.</p>
+          <p className="text-[11px] text-zinc-500 mt-2">Locks payment upfront. Approves delivery. Can&apos;t stiff the freelancer — once locked, the money can only go to them.</p>
+          {view === 'client' && (
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <div className="rounded-xl bg-zinc-950/60 border border-zinc-800/60 px-3 py-2">
+                <p className="text-[10px] text-zinc-500">Contracts run</p>
+                <p className="text-base font-bold font-mono text-cyan-300">{asClient.length}</p>
+              </div>
+              <div className="rounded-xl bg-zinc-950/60 border border-zinc-800/60 px-3 py-2">
+                <p className="text-[10px] text-zinc-500">Total paid from escrow</p>
+                <p className="text-base font-bold font-mono text-violet-300">{settledUsd(asClient)} USDC</p>
+              </div>
+            </div>
+          )}
         </div>
         <div className="flex items-center justify-center">
           <span className="rounded-full border border-zinc-700 bg-zinc-900 px-3 py-1 text-[10px] font-semibold text-zinc-400 whitespace-nowrap">escrow between</span>
         </div>
-        <div className="bg-zinc-900/60 border border-emerald-900/40 rounded-2xl p-4">
-          <p className="text-[10px] text-zinc-500 uppercase tracking-wider mb-1">You — the freelancer</p>
+        <div className={`bg-zinc-900/60 border rounded-2xl p-4 ${view === 'freelancer' ? 'border-emerald-900/60' : 'border-emerald-900/30'}`}>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[10px] text-zinc-500 uppercase tracking-wider mb-0.5">The freelancer — {reputation?.provider?.address ? short(reputation.provider.address) : '0x70997970…'}</p>
+            {view === 'freelancer' && <span className="rounded-full bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 text-[9px] font-bold text-emerald-300 uppercase">that's you</span>}
+          </div>
           <p className="text-sm font-semibold text-white">Independent developer</p>
-          <p className="text-[10px] font-mono text-zinc-600 mt-0.5">{reputation?.provider?.address || '0x70997970…'}</p>
-          <p className="text-[11px] text-zinc-500 mt-2">Starts work only after money is locked. Gets paid the moment approval lands. Reputation is portable — not owned by any platform.</p>
+          <p className="text-[11px] text-zinc-500 mt-2">Starts work only after the money is locked. Gets paid the moment approval lands. Reputation is portable — not owned by any platform.</p>
+          {view === 'freelancer' && (
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <div className="rounded-xl bg-zinc-950/60 border border-zinc-800/60 px-3 py-2">
+                <p className="text-[10px] text-zinc-500">Contracts delivered</p>
+                <p className="text-base font-bold font-mono text-emerald-300">{asFreelancer.length}</p>
+              </div>
+              <div className="rounded-xl bg-zinc-950/60 border border-zinc-800/60 px-3 py-2">
+                <p className="text-[10px] text-zinc-500">Total earned</p>
+                <p className="text-base font-bold font-mono text-emerald-300">{settledUsd(asFreelancer)} USDC</p>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Reputation */}
-      {reputation?.provider && (
+      {/* Reputation — of whichever side you're viewing */}
+      {reputation && (view === 'freelancer' ? reputation.provider : reputation.buyer) && (
         <div className="mb-6 inline-flex items-center gap-4 bg-zinc-900/60 border border-zinc-800 rounded-2xl px-5 py-3">
           <FiAward size={18} className="text-amber-400" />
           <div>
-            <p className="text-[10px] text-zinc-500 uppercase tracking-wider">Your on-chain reputation</p>
+            <p className="text-[10px] text-zinc-500 uppercase tracking-wider">
+              {view === 'freelancer' ? 'Your on-chain reputation as a freelancer' : "The freelancer's on-chain reputation (what you can verify before hiring)"}
+            </p>
             <p className="text-lg font-bold font-mono text-emerald-400 leading-tight">
-              {reputation.provider.engagementsCompleted} <span className="text-xs font-sans text-zinc-500 font-normal">completed contracts — permanent, verifiable by any future client</span>
+              {reputation.provider?.engagementsCompleted}{' '}
+              <span className="text-xs font-sans text-zinc-500 font-normal">completed contracts — permanent, verifiable by any future client</span>
             </p>
           </div>
         </div>
@@ -175,7 +232,8 @@ const EngagementsPanel = () => {
         <div className="lg:col-span-3 bg-zinc-900/60 border border-zinc-800 rounded-2xl p-5">
           <div className="flex flex-wrap items-center justify-between gap-3 mb-1">
             <h2 className="text-sm font-semibold text-zinc-200 flex items-center gap-2">
-              <FiBriefcase size={14} className="text-cyan-400" /> Run a real contract — the website project
+              <FiBriefcase size={14} className="text-cyan-400" />
+              {view === 'freelancer' ? 'See a client hire you — run the flow live' : 'Run a real contract — the website project'}
             </h2>
             <label className="flex items-center gap-2 text-xs text-zinc-500">
               Contract value (USDC)
@@ -257,7 +315,10 @@ const EngagementsPanel = () => {
           {run && revealed >= run.steps.length && (
             <div className="mt-4 rounded-xl border border-emerald-500/25 bg-emerald-500/5 p-3.5">
               <p className="text-xs font-semibold text-emerald-300 flex items-center gap-1.5">
-                <FiShield size={12} /> Contract complete — you were paid {amount} USDC from escrow, zero chargeback risk.
+                <FiShield size={12} />
+                {view === 'freelancer'
+                  ? `Contract complete — ${amount} USDC released from escrow to your wallet, zero chargeback risk.`
+                  : `Contract complete — you approved and paid ${amount} USDC from escrow.`}
               </p>
               <p className="text-[10px] text-zinc-500 mt-1">
                 {run.service ? <span className="text-cyan-300/80">“{run.service}” · </span> : null}
@@ -283,11 +344,21 @@ const EngagementsPanel = () => {
             </div>
           ) : (
             <div className="space-y-2 max-h-[26rem] overflow-y-auto">
-              {list.items.map((e) => (
+              {list.items.map((e) => {
+                const role = roleOf(e);
+                return (
                 <div key={e.id} className="rounded-xl border border-zinc-800/60 bg-zinc-950/40 p-3">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-xs font-semibold text-white">{e.usd} USDC contract</span>
-                    <span className={`rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase ${STATUS_STYLE[e.status] || STATUS_STYLE.CANCELLED}`}>{e.status}</span>
+                    <div className="flex items-center gap-1.5">
+                      {role && (
+                        <span className={`rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase ${
+                          role === 'client' ? 'text-cyan-300 border-cyan-500/30 bg-cyan-500/10' : 'text-emerald-300 border-emerald-500/30 bg-emerald-500/10'}`}>
+                          your {role === 'client' ? 'hire' : 'gig'}
+                        </span>
+                      )}
+                      <span className={`rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase ${STATUS_STYLE[e.status] || STATUS_STYLE.CANCELLED}`}>{e.status}</span>
+                    </div>
                   </div>
                   {e.service ? (
                     <p className="mt-1 text-[11px] text-cyan-300/90">📋 {e.service}</p>
@@ -312,7 +383,8 @@ const EngagementsPanel = () => {
                     ))}
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
